@@ -22,10 +22,14 @@ bash.patch := $(mk.dir)/bash-on-android.data
 buildroot := build-$(ARCH)-bash-$(bash.ver)
 buildroot.toolchain := $(buildroot)/ANDROID-TOOLCHAIN
 
-export PATH := $(mk.dir)/$(buildroot.toolchain)/bin:$(PATH)
-# export CC := $(TARGET)-gcc
-# export LD := $(TARGET)-ld
-# export AS := $(TARGET)-as
+path.modified :=
+path.orig := $(PATH)
+path = $(if $(1),$(realpath $(buildroot.toolchain))/bin:$(path.orig),$(path.orig))
+
+export PATH = $(call path,$(path.modified))
+export CC := $(TARGET)-gcc
+export LD := $(TARGET)-ld
+export AS := $(TARGET)-as
 
 define help :=
 Cross-compiles bash $(bash.ver) via Android NDK.
@@ -60,6 +64,7 @@ $(toolchain.done): $(clean.done)
 configure.done := $(buildroot)/.gmake.configure
 export bash_cv_job_control_missing := present
 $(configure.done): $(toolchain.done)
+	$(eval path.modified=1)
 	cd $(buildroot) && $(src)/configure --host=$(TARGET) \
 		--disable-nls \
 		--enable-static-link \
@@ -73,6 +78,7 @@ $(patch.done): $(bash.patch)
 
 compile.done := $(buildroot)/.gmake.compile
 $(compile.done): $(configure.done) | $(patch.done)
+	$(eval path.modified=1)
 	cd $(buildroot) && make
 	touch $@
 
