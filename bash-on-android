@@ -1,0 +1,80 @@
+#!/bin/sh
+# -*-makefile-gmake-*- \
+# the next line restarts using GNU Make \
+exec make -f "$0" ${1+"$@"}
+
+.DELETE_ON_ERROR:
+pp-%:
+	@echo "$(strip $($*))" | tr ' ' \\n
+
+mk := $(realpath $(lastword $(MAKEFILE_LIST)))
+mk.dir := $(dir $(mk))
+
+NDK := /opt/s/android-ndk-r10e
+bash.ver := 4.4-beta
+SRC := bash-$(bash.ver)
+ARCH := arm
+TARGET := $(ARCH)-linux-androideabi
+PLATFORM := android-9
+
+src := $(realpath $(SRC))
+bash.patch := $(mk.dir)/bash-on-android.data
+buildroot := build-$(ARCH)-bash-$(bash.ver)
+buildroot.toolchain := $(buildroot)/ANDROID-TOOLCHAIN
+
+export PATH := $(mk.dir)/$(buildroot.toolchain)/bin:$(PATH)
+# export CC := $(TARGET)-gcc
+# export LD := $(TARGET)-ld
+# export AS := $(TARGET)-as
+
+define help :=
+Cross-compiles bash $(bash.ver) via Android NDK.
+
+Build:
+
+	$$ $(notdir $(mk)) NDK=$(NDK) SRC=$(SRC) compile
+
+NDK is a path to the installed Android NDK.
+SRC is an unpacked tarball directory.
+
+Tweak all options (everything is case-sensitive):
+
+	$$ $(notdir $(mk)) NDK=$(NDK) SRC=$(SRC) TARGET=$(TARGET) PLATFORM=$(PLATFORM) ARCH=$(ARCH) compile
+endef
+
+.PHONY: help
+help:
+	$(info $(help))@:
+
+clean.done := $(buildroot)/.gmake.clean
+$(clean.done):
+	rm -rf $(buildroot)
+	mkdir -p $(buildroot)
+	touch $@
+
+toolchain.done := $(buildroot)/.gmake.toolchain
+$(toolchain.done): $(clean.done)
+	$(NDK)/build/tools/make-standalone-toolchain.sh --platform=$(PLATFORM) --install-dir=$(buildroot.toolchain) --arch=$(ARCH)
+	touch $@
+
+configure.done := $(buildroot)/.gmake.configure
+export bash_cv_job_control_missing := present
+$(configure.done): $(toolchain.done)
+	cd $(buildroot) && $(src)/configure --host=$(TARGET) \
+		--disable-nls \
+		--enable-static-link \
+		--with-bash-malloc=no
+	touch $@
+
+patch.done := $(src)/.gmake.patch
+$(patch.done): $(bash.patch)
+	cd $(src) && patch -p1 < $(bash.patch)
+	touch $@
+
+compile.done := $(buildroot)/.gmake.compile
+$(compile.done): $(configure.done) | $(patch.done)
+	cd $(buildroot) && make
+	touch $@
+
+.PHONY: compile
+compile: $(compile.done)
