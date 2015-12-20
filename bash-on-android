@@ -3,6 +3,18 @@
 # the next line restarts using GNU Make \
 exec make -f "$0" ${1+"$@"}
 
+# user-overridable vars
+NDK := /opt/s/android-ndk-r10e
+VER := 4.4-beta
+SRC := bash-$(VER).tar.gz
+ARCH := arm
+TARGET := $(ARCH)-linux-androideabi
+PLATFORM := android-9
+# expected directory after unpacking the tarball
+src.dir := $(basename $(basename $(SRC)))
+
+
+
 .DELETE_ON_ERROR:
 pp-%:
 	@echo "$(strip $($*))" | tr ' ' \\n
@@ -10,77 +22,93 @@ pp-%:
 mk := $(realpath $(lastword $(MAKEFILE_LIST)))
 mk.dir := $(dir $(mk))
 
-NDK := /opt/s/android-ndk-r10e
-bash.ver := 4.4-beta
-SRC := bash-$(bash.ver)
-ARCH := arm
-TARGET := $(ARCH)-linux-androideabi
-PLATFORM := android-9
-
-src := $(realpath $(SRC))
-bash.patch := $(mk.dir)/bash-on-android.data
-buildroot := build-$(ARCH)-bash-$(bash.ver)
-buildroot.toolchain := $(buildroot)/ANDROID-TOOLCHAIN
-
-path.modified :=
-path.orig := $(PATH)
-path = $(if $(1),$(realpath $(buildroot.toolchain))/bin:$(path.orig),$(path.orig))
-
-export PATH = $(call path,$(path.modified))
-export CC := $(TARGET)-gcc
-export LD := $(TARGET)-ld
-export AS := $(TARGET)-as
-
 define help :=
-Cross-compiles bash $(bash.ver) via Android NDK.
+Cross-compiles bash $(VER) w/ Android NDK.
 
-Build:
+Quick build:
 
-	$$ $(notdir $(mk)) NDK=$(NDK) SRC=$(SRC) compile
+	$$ $(notdir $(mk)) NDK=$(NDK) compile
 
 NDK is a path to the installed Android NDK.
-SRC is an unpacked tarball directory.
-
-Tweak all options (everything is case-sensitive):
+Override some defaults (everything is case-sensitive):
 
 	$$ $(notdir $(mk)) NDK=$(NDK) SRC=$(SRC) TARGET=$(TARGET) PLATFORM=$(PLATFORM) ARCH=$(ARCH) compile
+
+Targets:
+	unpack
+	toolchain
+	config
+	patch
+	compile
+	clean
 endef
 
 .PHONY: help
 help:
 	$(info $(help))@:
 
-clean.done := $(buildroot)/.gmake.clean
-$(clean.done):
-	rm -rf $(buildroot)
-	mkdir -p $(buildroot)
+
+
+bash.patch := $(mk.dir)/bash-on-android.data
+buildroot := build-$(ARCH)-bash-$(VER)
+toolchain.dir := android-toolchain-$(TARGET)
+
+path.modified :=
+path.orig := $(PATH)
+path = $(if $(1),$(realpath $(toolchain.dir))/bin:$(path.orig),$(path.orig))
+
+export PATH = $(call path,$(path.modified))
+export CC := $(TARGET)-gcc
+export LD := $(TARGET)-ld
+export AS := $(TARGET)-as
+
+unpack.target := $(src.dir)/.gmake.unpack
+.PHONY: unpack
+unpack: $(unpack.target)
+$(unpack.target): $(SRC)
+	tar xfz $<
 	touch $@
 
-toolchain.done := $(buildroot)/.gmake.toolchain
-$(toolchain.done): $(clean.done)
-	$(NDK)/build/tools/make-standalone-toolchain.sh --platform=$(PLATFORM) --install-dir=$(buildroot.toolchain) --arch=$(ARCH)
+toolchain.target := $(toolchain.dir)/.gmake.toolchain
+.PHONY: toolchain
+toolchain: $(toolchain.target)
+$(toolchain.target):
+	$(NDK)/build/tools/make-standalone-toolchain.sh \
+		--platform=$(PLATFORM) --install-dir=$(toolchain.dir) \
+		--arch=$(ARCH)
 	touch $@
 
-configure.done := $(buildroot)/.gmake.configure
+$(buildroot):
+	mkdir -p $(@)
+
+# FIXME: patch aclocal.m4 instead
 export bash_cv_job_control_missing := present
-$(configure.done): $(toolchain.done)
-	$(eval path.modified=1)
-	cd $(buildroot) && $(src)/configure --host=$(TARGET) \
+config.target := $(buildroot)/.gmake.config
+.PHONY: config
+config: $(config.target)
+$(config.target): $(toolchain.target) $(unpack.target) | $(buildroot)
+	$(eval path.modified:=1)
+	cd $(buildroot) && $(realpath $(src.dir))/configure --host=$(TARGET) \
 		--disable-nls \
 		--enable-static-link \
 		--with-bash-malloc=no
 	touch $@
 
-patch.done := $(src)/.gmake.patch
-$(patch.done): $(bash.patch)
-	cd $(src) && patch -p1 < $(bash.patch)
+patch.target := $(src.dir)/.gmake.patch
+.PHONY: patch
+patch: $(patch.target)
+$(patch.target): | $(config.target)
+	cd $(src.dir) && patch -p1 < $(bash.patch)
 	touch $@
 
-compile.done := $(buildroot)/.gmake.compile
-$(compile.done): $(configure.done) | $(patch.done)
-	$(eval path.modified=1)
+compile.target := $(buildroot)/.gmake.compile
+.PHONY: compile
+compile: $(compile.target)
+$(compile.target): $(patch.target)
+	$(eval path.modified:=1)
 	cd $(buildroot) && make
 	touch $@
 
-.PHONY: compile
-compile: $(compile.done)
+.PHONY: clean
+clean:
+	rm -rf $(buildroot) $(src.dir) $(toolchain.dir)
