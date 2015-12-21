@@ -53,11 +53,8 @@ bash.patch := $(mk.dir)/bash-on-android.data
 buildroot := build-$(ARCH)-bash-$(VER)
 toolchain.dir := android-toolchain-$(TARGET)
 
-path.modified :=
 path.orig := $(PATH)
-path = $(if $(1),$(realpath $(toolchain.dir))/bin:$(path.orig),$(path.orig))
-
-export PATH = $(call path,$(path.modified))
+PATH = $(realpath $(toolchain.dir))/bin:$(path.orig)
 export CC := $(TARGET)-gcc
 export LD := $(TARGET)-ld
 export AS := $(TARGET)-as
@@ -87,7 +84,6 @@ config.target := $(buildroot)/.gmake.config
 .PHONY: config
 config: $(config.target)
 $(config.target): $(toolchain.target) $(unpack.target) | $(buildroot)
-	$(eval path.modified:=1)
 	cd $(buildroot) && $(realpath $(src.dir))/configure --host=$(TARGET) \
 		--disable-nls \
 		--enable-static-link \
@@ -110,7 +106,6 @@ compile.target := $(buildroot)/.gmake.compile
 .PHONY: compile
 compile: $(compile.target)
 $(compile.target): $(patch.target)
-	$(eval path.modified:=1)
 	cd $(buildroot) && make
 	touch $@
 
